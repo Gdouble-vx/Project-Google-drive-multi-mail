@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Google Drive Multi Mail</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">☁️ GDrive Multi</a>
+        </div>
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
+            <button class="nav-tab" data-tab="files" onclick="switchTab('files')">📁 ไฟล์</button>
+            <button class="nav-tab" data-tab="upload" onclick="switchTab('upload')">⬆️ อัพโหลด</button>
+            <button class="nav-tab" data-tab="search" onclick="switchTab('search')">🔍 ค้นหา</button>
+            <button class="nav-tab" data-tab="accounts" onclick="switchTab('accounts')">👤 บัญชี</button>
+            <button class="nav-tab" data-tab="drives" onclick="switchTab('drives')">💾 Drive</button>
+        </div>
+    </nav>
+
+    <!-- Dashboard Tab -->
+    <div id="tab-dashboard" class="tab-content active">
+        <h2>📊 สรุปพื้นที่จัดเก็บ</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">💾</div>
+                <div class="stat-value" id="stat-total">--</div>
+                <div class="stat-label">พื้นที่ทั้งหมด</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-value" id="stat-used">--</div>
+                <div class="stat-label">ใช้ไปแล้ว</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-value" id="stat-available">--</div>
+                <div class="stat-label">ว่าง</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📄</div>
+                <div class="stat-value" id="stat-files">--</div>
+                <div class="stat-label">ไฟล์ทั้งหมด</div>
+            </div>
+        </div>
+        <div class="storage-bar-container">
+            <div class="storage-bar">
+                <div class="storage-bar-fill" id="storage-fill"></div>
+            </div>
+            <span class="storage-bar-label" id="storage-label">0%</span>
+        </div>
+        <h3>🔄 Background Sync</h3>
+        <div class="card" id="sync-status-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
+                <div>
+                    <span id="sync-status-dot" class="status-dot status-pending"></span>
+                    <strong id="sync-status-text">กำลังตรวจสอบ...</strong>
+                </div>
+                <button class="btn btn-sm btn-primary" onclick="manualSync()">🔄 ซิงค์ตอนนี้</button>
+            </div>
+            <div class="drive-quota" style="margin-top:0.75rem" id="sync-details">
+                <span>ครั้งที่ซิงค์: <strong id="sync-count">0</strong></span>
+                <span>ซิงค์ล่าสุด: <strong id="sync-last">ยังไม่เคยซิงค์</strong></span>
+                <span>ซิงค์ถัดไป: <strong id="sync-next">--</strong></span>
+                <span>ใช้เวลา: <strong id="sync-duration">--</strong></span>
+            </div>
+        </div>
+        <h3>Drive ที่เชื่อมต่อ</h3>
+        <div id="drive-list-dashboard"></div>
+    </div>
+
+    <!-- Files Tab -->
+    <div id="tab-files" class="tab-content" style="padding:0">
+        <div style="display:flex;height:calc(100vh - 60px);overflow:hidden">
+            <!-- Folder Tree Sidebar -->
+            <div class="folder-sidebar" id="folder-sidebar">
+                <div class="folder-sidebar-header">
+                    <strong>📂 โฟลเดอร์</strong>
+                    <button class="btn btn-sm btn-primary" onclick="showNewFolderDialog()" title="สร้างโฟลเดอร์">+</button>
+                </div>
+                <div class="folder-tree" id="folder-tree">
+                    <div class="loading">กำลังโหลด...</div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+                <!-- Breadcrumb -->
+                <div class="breadcrumb-bar" id="breadcrumb-bar"></div>
+
+                <!-- File List -->
+                <div style="flex:1;overflow-y:auto;padding:1rem">
+                    <div id="file-list" class="file-list">
+                        <div class="loading">กำลังโหลด...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preview Panel -->
+            <div class="preview-panel" id="preview-panel" style="display:none">
+                <div class="preview-header">
+                    <strong id="preview-filename">Preview</strong>
+                    <button class="btn btn-sm" onclick="closePreview()">✕</button>
+                </div>
+                <div class="preview-body" id="preview-body"></div>
+            </div>
+        </div>
+
+        <!-- New Folder Dialog -->
+        <div id="folder-dialog" class="modal" style="display:none">
+            <div class="modal-content" style="max-width:400px">
+                <span class="modal-close" onclick="closeFolderDialog()">&times;</span>
+                <h3>📁 สร้างโฟลเดอร์ใหม่</h3>
+                <form onsubmit="createFolder(event)" style="margin-top:1rem">
+                    <label>ชื่อโฟลเดอร์:</label>
+                    <input type="text" id="new-folder-name" required placeholder="ชื่อโฟลเดอร์">
+                    <label>โฟลเดอร์แม่:</label>
+                    <input type="text" id="new-folder-parent" readonly>
+                    <button type="submit" class="btn btn-primary" style="margin-top:1rem">สร้าง</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Tab -->
+    <div id="tab-upload" class="tab-content">
+        <h2>⬆️ อัพโหลดไฟล์</h2>
+
+        <!-- Upload Options -->
+        <div class="upload-options">
+            <label>คำอธิบาย:</label>
+            <textarea id="upload-description" placeholder="คำอธิบายไฟล์..."></textarea>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap">
+                <div style="flex:1;min-width:200px">
+                    <label>แท็ก (คั่นด้วยจุลภาค):</label>
+                    <input type="text" id="upload-tags" placeholder="work, important, backup">
+                </div>
+                <div style="flex:1;min-width:200px">
+                    <label>โฟลเดอร์:</label>
+                    <input type="text" id="upload-folder" value="/" placeholder="/">
+                </div>
+            </div>
+        </div>
+
+        <!-- Drop Zone -->
+        <div class="upload-area" id="upload-area">
+            <div class="upload-icon">📤</div>
+            <p><strong>ลากไฟล์มาวางที่นี่</strong> หรือคลิกเพื่อเลือก</p>
+            <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:1rem">รองรับหลายไฟล์พร้อมกัน • ไฟล์ >10GB ถูกแบ่งอัตโนมัติ</p>
+            <input type="file" id="file-input" multiple style="display:none">
+            <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">เลือกไฟล์</button>
+        </div>
+
+        <!-- Active Uploads -->
+        <div id="active-uploads"></div>
+
+        <!-- Overall Progress -->
+        <div id="upload-overall" style="display:none">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <strong>📦 กำลังอัพโหลด <span id="upload-total-count">0</span> ไฟล์</strong>
+                    <span id="upload-total-speed" style="color:var(--text-muted);font-size:0.85rem"></span>
+                </div>
+                <div class="progress-bar" style="margin-top:0.75rem">
+                    <div class="progress-fill" id="upload-overall-fill" style="width:0%"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:0.5rem;font-size:0.85rem;color:var(--text-muted)">
+                    <span id="upload-overall-pct">0%</span>
+                    <span id="upload-overall-eta"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Completed Uploads -->
+        <div id="upload-results"></div>
+    </div>
+
+    <!-- Search Tab -->
+    <div id="tab-search" class="tab-content">
+        <h2>🔍 ค้นหาไฟล์</h2>
+        <div class="search-bar">
+            <input type="text" id="search-input" placeholder="พิมพ์ชื่อไฟล์, แท็ก, หรือคำอธิบาย..." 
+                   onkeyup="if(event.key==='Enter')doSearch()">
+            <button class="btn btn-primary" onclick="doSearch()">ค้นหา</button>
+        </div>
+        <div id="search-results"></div>
+    </div>
+
+    <!-- Accounts Tab -->
+    <div id="tab-accounts" class="tab-content">
+        <h2>👤 จัดการบัญชี</h2>
+        <div class="card">
+            <h3>เพิ่มบัญชีใหม่</h3>
+            <form id="add-account-form" onsubmit="addAccount(event)">
+                <label>Email:</label>
+                <input type="email" id="acc-email" required placeholder="your-email@gmail.com">
+                <label>รหัสผ่าน:</label>
+                <input type="password" id="acc-password" required placeholder="รหัสผ่าน">
+                <button type="submit" class="btn btn-primary">เพิ่มบัญชี</button>
+            </form>
+        </div>
+        <h3>บัญชีทั้งหมด</h3>
+        <div id="account-list">
+            <div class="loading">กำลังโหลด...</div>
+        </div>
+    </div>
+
+    <!-- Drives Tab -->
+    <div id="tab-drives" class="tab-content">
+        <h2>💾 Drive ที่เชื่อมต่อ</h2>
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
+                <div>
+                    <span id="drives-sync-dot" class="status-dot status-pending"></span>
+                    <strong id="drives-sync-text">Background sync: รอตรวจสอบ...</strong>
+                </div>
+                <button class="btn btn-primary" onclick="syncDrives()">🔄 ซิงค์ตอนนี้</button>
+            </div>
+            <div class="drive-quota" style="margin-top:0.75rem" id="drives-sync-details"></div>
+        </div>
+        <h3>รายละเอียด Drive แต่ละบัญชี</h3>
+        <div id="drive-details"></div>
+    </div>
+
+    <!-- File Detail Modal -->
+    <div id="file-modal" class="modal" style="display:none">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
