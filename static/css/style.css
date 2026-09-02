@@ -959,11 +959,17 @@ form textarea:focus {
 
 /* ════════════════ Drag & Drop ════════════════ */
 
+.file-item {
+    transition: background 0.2s, border-color 0.2s, transform 0.2s, opacity 0.25s, box-shadow 0.2s;
+}
+
 .file-item.dragging {
-    opacity: 0.5;
+    opacity: 0.4;
     border-color: var(--accent);
     background: var(--bg-hover);
-    transform: scale(0.98);
+    transform: scale(0.96) rotate(-1deg);
+    box-shadow: 0 8px 24px rgba(76,124,247,0.3);
+    z-index: 10;
 }
 
 .tree-item.drag-over {
@@ -971,11 +977,23 @@ form textarea:focus {
     border-left-color: var(--accent);
     color: var(--accent);
     font-weight: 600;
+    animation: folderPulse 0.6s ease infinite alternate;
 }
 
 .tree-item.drag-over::after {
     content: '  ⬇️';
     font-size: 0.75rem;
+    animation: bounceDown 0.4s ease infinite alternate;
+}
+
+@keyframes folderPulse {
+    from { background: rgba(76, 124, 247, 0.1); }
+    to { background: rgba(76, 124, 247, 0.25); }
+}
+
+@keyframes bounceDown {
+    from { transform: translateY(-2px); }
+    to { transform: translateY(2px); }
 }
 
 .breadcrumb-item.drag-over {
@@ -983,6 +1001,65 @@ form textarea:focus {
     color: var(--accent);
     font-weight: 600;
     border-radius: 4px;
+    animation: folderPulse 0.6s ease infinite alternate;
+}
+
+/* ─── Drop success flash ─── */
+
+@keyframes dropSuccess {
+    0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); background: var(--bg-card); }
+    50% { box-shadow: 0 0 20px 4px rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.08); }
+    100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); background: var(--bg-card); }
+}
+
+.file-item.drop-success {
+    animation: dropSuccess 0.6s ease;
+    border-color: var(--success);
+}
+
+/* ─── File list stagger enter ─── */
+
+@keyframes fileEnter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.file-item.file-enter {
+    animation: fileEnter 0.25s ease forwards;
+}
+
+/* ─── Drag ghost counter ─── */
+
+.drag-ghost {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    background: var(--accent);
+    color: white;
+    padding: 0.4rem 0.8rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(76,124,247,0.4);
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.drag-ghost.visible {
+    opacity: 1;
+}
+
+/* ─── File remove animation ─── */
+
+@keyframes fileRemove {
+    from { opacity: 1; transform: translateX(0); max-height: 80px; }
+    to { opacity: 0; transform: translateX(-30px); max-height: 0; padding: 0; margin: 0; border-width: 0; }
+}
+
+.file-item.file-remove {
+    animation: fileRemove 0.35s ease forwards;
+    overflow: hidden;
 }
 
 /* ════════════════ Multi-Select ════════════════ */

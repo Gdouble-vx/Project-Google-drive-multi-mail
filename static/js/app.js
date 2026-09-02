@@ -657,16 +657,22 @@ async function batchDownloadSelected() {
 
 // ─── Drag & Drop: File → Folder (multi-select aware) ───
 
+let dragGhost = null; // floating counter badge
+let dragFileCount = 0;
+
 function onFileDragStart(event, fileId) {
     // If the dragged file is part of multi-selection, drag all selected
     if (selectedFiles.has(fileId) && selectedFiles.size > 1) {
         dragIsFromMultiSelect = true;
+        dragFileCount = selectedFiles.size;
         event.dataTransfer.setData('text/plain', JSON.stringify(Array.from(selectedFiles)));
     } else {
         dragIsFromMultiSelect = false;
+        dragFileCount = 1;
         event.dataTransfer.setData('text/plain', JSON.stringify([fileId]));
     }
     event.dataTransfer.effectAllowed = 'move';
+
     // Add visual feedback to the dragged item(s)
     if (dragIsFromMultiSelect) {
         document.querySelectorAll('.file-item.selected-multi').forEach(el => el.classList.add('dragging'));
@@ -674,12 +680,50 @@ function onFileDragStart(event, fileId) {
         const item = event.target.closest('.file-item');
         if (item) item.classList.add('dragging');
     }
+
+    // Create floating ghost counter
+    createDragGhost(event);
+}
+
+function createDragGhost(event) {
+    removeDragGhost();
+    dragGhost = document.createElement('div');
+    dragGhost.className = 'drag-ghost';
+    dragGhost.textContent = dragFileCount > 1 ? `${dragFileCount} ไฟล์` : '1 ไฟล์';
+    document.body.appendChild(dragGhost);
+    // Position near cursor
+    moveDragGhost(event.clientX, event.clientY);
+    requestAnimationFrame(() => dragGhost.classList.add('visible'));
+}
+
+function moveDragGhost(x, y) {
+    if (!dragGhost) return;
+    dragGhost.style.left = (x + 16) + 'px';
+    dragGhost.style.top = (y + 16) + 'px';
+}
+
+function removeDragGhost() {
+    if (dragGhost) {
+        dragGhost.classList.remove('visible');
+        setTimeout(() => dragGhost?.remove(), 150);
+        dragGhost = null;
+    }
 }
 
 function onFileDragEnd(event) {
     dragIsFromMultiSelect = false;
+    dragFileCount = 0;
+    removeDragGhost();
     document.querySelectorAll('.file-item.dragging').forEach(el => el.classList.remove('dragging'));
     document.querySelectorAll('.tree-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+// Track mouse to move ghost
+if (!window._dragGhostListenerAdded) {
+    window._dragGhostListenerAdded = true;
+    document.addEventListener('dragover', (e) => {
+        if (dragGhost) moveDragGhost(e.clientX, e.clientY);
+    });
 }
 
 function onFolderDragOver(event) {
@@ -784,7 +828,7 @@ async function onFolderDrop(event, targetPath) {
         }
 
         clearSelection();
-        loadFiles(currentFolder);
+        loadFilesWithDropFlash(currentFolder, fileIds);
         loadFolderTree();
     } catch (err) {
         showToast('ย้ายไฟล์ล้มเหลว: ' + err.message, 'error');
@@ -863,8 +907,8 @@ async function loadFiles(folder = '/') {
             return;
         }
 
-        container.innerHTML = data.files.map(f => `
-            <div class="file-item ${selectedFiles.has(f.file_id) ? 'selected-multi' : ''}" draggable="true" data-file-id="${f.file_id}"
+        container.innerHTML = data.files.map((f, idx) => `
+            <div class="file-item file-enter ${selectedFiles.has(f.file_id) ? 'selected-multi' : ''}" draggable="true" data-file-id="${f.file_id}" style="animation-delay:${Math.min(idx * 30, 300)}ms"
                  ondragstart="onFileDragStart(event, ${f.file_id})"
                  ondragend="onFileDragEnd(event)"
                  onclick="onFileClick(event, ${f.file_id}, '${escapePath(f.filename)}', '${f.mime_type || ''}')"
@@ -889,6 +933,24 @@ async function loadFiles(folder = '/') {
 
     } catch (err) {
         container.innerHTML = '<div class="empty-state"><p>เกิดข้อผิดพลาดในการโหลด</p></div>';
+    }
+}
+
+// ─── Load with drop flash ───
+
+async function loadFilesWithDropFlash(folder, movedFileIds) {
+    await loadFiles(folder);
+    // Flash the moved file items after a short delay
+    if (movedFileIds && movedFileIds.length > 0) {
+        setTimeout(() => {
+            for (const fid of movedFileIds) {
+                const el = document.querySelector(`.file-item[data-file-id="${fid}"]`);
+                if (el) {
+                    el.classList.add('drop-success');
+                    el.addEventListener('animationend', () => el.classList.remove('drop-success'), { once: true });
+                }
+            }
+        }, 100);
     }
 }
 
