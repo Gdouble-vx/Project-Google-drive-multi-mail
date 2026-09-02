@@ -169,7 +169,9 @@ async function manualSync() {
 let currentFolder = '/';
 let currentPreviewFileId = null;
 let folderTreeExpanded = new Set(['/']); // track expanded nodes
-let draggedFileId = null; // track which file is being dragged
+let selectedFiles = new Set(); // multi-select file IDs
+let lastClickedFileId = null; // for shift-click range
+let dragIsFromMultiSelect = false; // whether drag is from multi-selected group
 
 // ─── Folder Tree ───
 
@@ -228,22 +230,132 @@ function escapePath(p) {
     return p.replace(/'/g, "\\'").replace(/\/\//g, '/');
 }
 
-// ─── Drag & Drop: File → Folder ───
+// ─── File Click: Ctrl+Click & Shift+Click ───
+
+function onFileClick(event, fileId, filename, mimeType) {
+    const isCtrl = event.ctrlKey || event.metaKey;
+    const isShift = event.shiftKey;
+
+    if (isCtrl) {
+        // Toggle selection
+        if (selectedFiles.has(fileId)) {
+            selectedFiles.delete(fileId);
+        } else {
+            selectedFiles.add(fileId);
+        }
+        lastClickedFileId = fileId;
+        updateFileItemSelection();
+        updateSelectionToolbar();
+    } else if (isShift && lastClickedFileId != null) {
+        // Range select: select all files between lastClicked and current
+        const fileItems = Array.from(document.querySelectorAll('.file-item[data-file-id]'));
+        const lastIdx = fileItems.findIndex(el => el.dataset.fileId == lastClickedFileId);
+        const currentIdx = fileItems.findIndex(el => el.dataset.fileId == fileId);
+        if (lastIdx !== -1 && currentIdx !== -1) {
+            const start = Math.min(lastIdx, currentIdx);
+            const end = Math.max(lastIdx, currentIdx);
+            for (let i = start; i <= end; i++) {
+                selectedFiles.add(parseInt(fileItems[i].dataset.fileId));
+            }
+        }
+        lastClickedFileId = fileId;
+        updateFileItemSelection();
+        updateSelectionToolbar();
+    } else {
+        // Normal click: clear selection and preview
+        if (selectedFiles.size > 0 && !isCtrl) {
+            selectedFiles.clear();
+            updateFileItemSelection();
+            updateSelectionToolbar();
+        }
+        lastClickedFileId = fileId;
+        previewFile(fileId, filename, mimeType);
+    }
+}
+
+function updateFileItemSelection() {
+    document.querySelectorAll('.file-item[data-file-id]').forEach(el => {
+        const id = parseInt(el.dataset.fileId);
+        el.classList.toggle('selected-multi', selectedFiles.has(id));
+    });
+}
+
+function updateSelectionToolbar() {
+    const toolbar = document.getElementById('selection-toolbar');
+    if (!toolbar) return;
+
+    if (selectedFiles.size === 0) {
+        toolbar.style.display = 'none';
+        return;
+    }
+
+    toolbar.style.display = 'flex';
+    toolbar.innerHTML = `
+        <span class="selection-count">เลือก ${selectedFiles.size} ไฟล์</span>
+        <button class="btn btn-sm" onclick="batchDownloadSelected()" title="ดาวน์โหลดทั้งหมด">⬇️ ดาวน์โหลด</button>
+        <button class="btn btn-sm btn-danger" onclick="batchDeleteSelected()" title="ลบทั้งหมด">🗑️ ลบ</button>
+        <button class="btn btn-sm" onclick="clearSelection()" title="ยกเลิกการเลือก">✕ ยกเลิก</button>
+    `;
+}
+
+function clearSelection() {
+    selectedFiles.clear();
+    lastClickedFileId = null;
+    updateFileItemSelection();
+    updateSelectionToolbar();
+}
+
+async function batchDeleteSelected() {
+    if (selectedFiles.size === 0) return;
+    if (!confirm(`ต้องการลบ ${selectedFiles.size} ไฟล์จริงหรือไม่?`)) return;
+
+    let deleted = 0;
+    let errors = 0;
+    for (const fid of selectedFiles) {
+        try {
+            const res = await fetch(`${API}/api/files/${fid}`, { method: 'DELETE' });
+            if (res.ok) deleted++;
+            else errors++;
+        } catch { errors++; }
+    }
+
+    showToast(`ลบ ${deleted} ไฟล์สำเร็จ${errors > 0 ? `, ${errors} ล้มเหลว` : ''}`);
+    clearSelection();
+    loadFiles(currentFolder);
+    loadFolderTree();
+}
+
+async function batchDownloadSelected() {
+    for (const fid of selectedFiles) {
+        downloadFile(fid);
+    }
+    showToast(`กำลังดาวน์โหลด ${selectedFiles.size} ไฟล์...`);
+}
+
+// ─── Drag & Drop: File → Folder (multi-select aware) ───
 
 function onFileDragStart(event, fileId) {
-    draggedFileId = fileId;
+    // If the dragged file is part of multi-selection, drag all selected
+    if (selectedFiles.has(fileId) && selectedFiles.size > 1) {
+        dragIsFromMultiSelect = true;
+        event.dataTransfer.setData('text/plain', JSON.stringify(Array.from(selectedFiles)));
+    } else {
+        dragIsFromMultiSelect = false;
+        event.dataTransfer.setData('text/plain', JSON.stringify([fileId]));
+    }
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', fileId);
-    // Add visual feedback to the dragged item
-    const item = event.target.closest('.file-item');
-    if (item) item.classList.add('dragging');
+    // Add visual feedback to the dragged item(s)
+    if (dragIsFromMultiSelect) {
+        document.querySelectorAll('.file-item.selected-multi').forEach(el => el.classList.add('dragging'));
+    } else {
+        const item = event.target.closest('.file-item');
+        if (item) item.classList.add('dragging');
+    }
 }
 
 function onFileDragEnd(event) {
-    draggedFileId = null;
-    const item = event.target.closest('.file-item');
-    if (item) item.classList.remove('dragging');
-    // Remove all drag-over highlights
+    dragIsFromMultiSelect = false;
+    document.querySelectorAll('.file-item.dragging').forEach(el => el.classList.remove('dragging'));
     document.querySelectorAll('.tree-item.drag-over').forEach(el => el.classList.remove('drag-over'));
 }
 
@@ -264,8 +376,17 @@ async function onFolderDrop(event, targetPath) {
     const treeItem = event.target.closest('.tree-item');
     if (treeItem) treeItem.classList.remove('drag-over');
 
-    const fileId = event.dataTransfer.getData('text/plain');
-    if (!fileId) return;
+    const rawData = event.dataTransfer.getData('text/plain');
+    if (!rawData) return;
+
+    let fileIds;
+    try {
+        fileIds = JSON.parse(rawData);
+    } catch {
+        fileIds = [parseInt(rawData)];
+    }
+
+    if (!fileIds || fileIds.length === 0) return;
 
     // Don't move to the same folder
     if (targetPath === currentFolder) {
@@ -274,23 +395,37 @@ async function onFolderDrop(event, targetPath) {
     }
 
     try {
-        const formData = new FormData();
-        formData.append('folder_path', targetPath);
-
-        const res = await fetch(`${API}/api/files/${fileId}/move`, {
-            method: 'PATCH',
-            body: formData,
-        });
-        const data = await res.json();
-
-        if (res.ok) {
-            showToast(`ย้าย "${data.filename}" ไป ${targetPath} สำเร็จ`);
-            // Refresh both source and target
-            loadFiles(currentFolder);
-            loadFolderTree();
+        if (fileIds.length === 1) {
+            // Single file move
+            const formData = new FormData();
+            formData.append('folder_path', targetPath);
+            const res = await fetch(`${API}/api/files/${fileIds[0]}/move`, {
+                method: 'PATCH', body: formData,
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`ย้าย "${data.filename}" ไป ${targetPath} สำเร็จ`);
+            } else {
+                showToast(data.detail || 'ย้ายไฟล์ล้มเหลว', 'error');
+            }
         } else {
-            showToast(data.detail || 'ย้ายไฟล์ล้มเหลว', 'error');
+            // Batch move
+            const res = await fetch(`${API}/api/files/batch-move`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_ids: fileIds, folder_path: targetPath }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`ย้าย ${data.moved} ไฟล์ไป ${targetPath} สำเร็จ${data.errors > 0 ? `, ${data.errors} ล้มเหลว` : ''}`);
+            } else {
+                showToast(data.detail || 'ย้ายไฟล์ล้มเหลว', 'error');
+            }
         }
+
+        clearSelection();
+        loadFiles(currentFolder);
+        loadFolderTree();
     } catch (err) {
         showToast('ย้ายไฟล์ล้มเหลว: ' + err.message, 'error');
     }
@@ -308,6 +443,7 @@ function toggleFolder(path) {
 function navigateFolder(path) {
     currentFolder = path;
     closePreview();
+    clearSelection();
     loadFiles(path);
     updateBreadcrumb(path);
     highlightActiveFolder();
@@ -368,10 +504,10 @@ async function loadFiles(folder = '/') {
         }
 
         container.innerHTML = data.files.map(f => `
-            <div class="file-item" draggable="true" data-file-id="${f.file_id}"
+            <div class="file-item ${selectedFiles.has(f.file_id) ? 'selected-multi' : ''}" draggable="true" data-file-id="${f.file_id}"
                  ondragstart="onFileDragStart(event, ${f.file_id})"
                  ondragend="onFileDragEnd(event)"
-                 onclick="previewFile(${f.file_id}, '${escapePath(f.filename)}', '${f.mime_type || ''}')">
+                 onclick="onFileClick(event, ${f.file_id}, '${escapePath(f.filename)}', '${f.mime_type || ''}')">
                 <div class="file-icon">${getFileIcon(f.filename, f.is_split)}</div>
                 <div class="file-info">
                     <div class="file-name">

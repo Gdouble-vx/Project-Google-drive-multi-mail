@@ -10,6 +10,7 @@ import datetime
 from typing import Optional, List
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -640,6 +641,11 @@ async def download_file(file_id: int, session: Session = Depends(get_db_session)
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
+class BatchMoveRequest(BaseModel):
+    file_ids: List[int]
+    folder_path: str
+
+
 @app.patch("/api/files/{file_id}/move")
 async def move_file(
     file_id: int,
@@ -665,6 +671,39 @@ async def move_file(
         "file_id": vf.id,
         "filename": vf.filename,
         "folder_path": vf.folder_path,
+    }
+
+
+@app.patch("/api/files/batch-move")
+async def batch_move_files(
+    request: BatchMoveRequest,
+    session: Session = Depends(get_db_session)
+):
+    """Move multiple files to a different folder."""
+    # Normalize path
+    folder_path = request.folder_path.rstrip("/") if request.folder_path != "/" else "/"
+    if not folder_path.startswith("/"):
+        folder_path = "/" + folder_path
+
+    moved = []
+    errors = []
+    for fid in request.file_ids:
+        vf = db.get_virtual_file(session, fid)
+        if not vf:
+            errors.append({"file_id": fid, "error": "File not found"})
+            continue
+        vf.folder_path = folder_path
+        moved.append({"file_id": fid, "filename": vf.filename})
+
+    session.commit()
+
+    return {
+        "status": "success",
+        "moved": len(moved),
+        "errors": len(errors),
+        "files": moved,
+        "error_details": errors,
+        "folder_path": folder_path,
     }
 
 
