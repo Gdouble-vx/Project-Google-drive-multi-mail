@@ -229,6 +229,51 @@
         <div id="drive-details"></div>
     </div>
 
+    <!-- Context Menu -->
+    <div id="context-menu" class="context-menu" style="display:none">
+        <div class="context-menu-item" onclick="contextMenuAction('open')">📄 เปิด</div>
+        <div class="context-menu-item" onclick="contextMenuAction('details')">📋 รายละเอียด</div>
+        <div class="context-menu-sep"></div>
+        <div class="context-menu-item" onclick="contextMenuAction('move')">📁 ย้ายไปที่...</div>
+        <div class="context-menu-item" onclick="contextMenuAction('copy')">📋 คัดลอกไปที่...</div>
+        <div class="context-menu-item" onclick="contextMenuAction('rename')">✏️ เปลี่ยนชื่อ</div>
+        <div class="context-menu-sep"></div>
+        <div class="context-menu-item" onclick="contextMenuAction('download')">⬇️ ดาวน์โหลด</div>
+        <div class="context-menu-item context-menu-danger" onclick="contextMenuAction('delete')">🗑️ ลบ</div>
+    </div>
+
+    <!-- Folder Picker Dialog (for Move/Copy) -->
+    <div id="folder-picker-dialog" class="modal" style="display:none">
+        <div class="modal-content" style="max-width:500px">
+            <span class="modal-close" onclick="closeFolderPicker()">&times;</span>
+            <h3 id="folder-picker-title">เลือกโฟลเดอร์</h3>
+            <div class="folder-picker-tree" id="folder-picker-tree"></div>
+            <div class="folder-picker-footer">
+                <span>目的地: <strong id="folder-picker-selected-path">/</strong></span>
+                <div style="display:flex;gap:0.5rem">
+                    <button class="btn btn-sm" onclick="closeFolderPicker()">ยกเลิก</button>
+                    <button class="btn btn-sm btn-primary" onclick="confirmFolderPicker()">ยืนยัน</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Dialog -->
+    <div id="rename-dialog" class="modal" style="display:none">
+        <div class="modal-content" style="max-width:400px">
+            <span class="modal-close" onclick="closeRenameDialog()">&times;</span>
+            <h3>✏️ เปลี่ยนชื่อไฟล์</h3>
+            <div style="margin-top:1rem">
+                <label>ชื่อใหม่:</label>
+                <input type="text" id="rename-input" placeholder="ชื่อไฟล์">
+            </div>
+            <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
+                <button class="btn btn-sm" onclick="closeRenameDialog()">ยกเลิก</button>
+                <button class="btn btn-sm btn-primary" onclick="confirmRename()">เปลี่ยนชื่อ</button>
+            </div>
+        </div>
+    </div>
+
     <!-- File Detail Modal -->
     <div id="file-modal" class="modal" style="display:none">
         <div class="modal-content">

@@ -707,6 +707,66 @@ async def batch_move_files(
     }
 
 
+class CopyFileRequest(BaseModel):
+    folder_path: str
+    new_filename: Optional[str] = None
+
+
+@app.post("/api/files/{file_id}/copy")
+async def copy_file(
+    file_id: int,
+    request: CopyFileRequest,
+    session: Session = Depends(get_db_session)
+):
+    """Copy a file's metadata to a new folder (same chunks, new VirtualFile record)."""
+    vf = db.get_virtual_file(session, file_id)
+    if not vf:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Normalize path
+    folder_path = request.folder_path.rstrip("/") if request.folder_path != "/" else "/"
+    if not folder_path.startswith("/"):
+        folder_path = "/" + folder_path
+
+    new_filename = request.new_filename or vf.filename
+
+    # Create new VirtualFile with same properties
+    new_vf = db.create_virtual_file(
+        session,
+        filename=new_filename,
+        original_size=vf.original_size,
+        mime_type=vf.mime_type,
+        md5_hash=vf.md5_hash,
+        is_split=vf.is_split,
+        chunk_size=vf.chunk_size,
+        num_chunks=vf.num_chunks,
+        description=vf.description,
+        tags=list(vf.tags) if vf.tags else None,
+        folder_path=folder_path,
+    )
+
+    # Copy chunk records (same Drive file IDs, new VirtualFile reference)
+    chunks = db.get_chunks_for_file(session, file_id)
+    for chunk in chunks:
+        db.create_file_chunk(
+            session,
+            virtual_file_id=new_vf.id,
+            account_id=chunk.account_id,
+            chunk_index=chunk.chunk_index,
+            chunk_size=chunk.chunk_size,
+            google_drive_file_id=chunk.google_drive_file_id,
+            google_drive_filename=chunk.google_drive_filename,
+            md5_hash=chunk.md5_hash,
+        )
+
+    return {
+        "status": "success",
+        "file_id": new_vf.id,
+        "filename": new_vf.filename,
+        "folder_path": new_vf.folder_path,
+    }
+
+
 @app.delete("/api/files/{file_id}")
 async def delete_file(file_id: int, session: Session = Depends(get_db_session)):
     """Delete a file and all its chunks."""

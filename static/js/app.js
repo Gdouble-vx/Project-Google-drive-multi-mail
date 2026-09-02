@@ -109,6 +109,278 @@ function getFileIcon(filename, isSplit) {
     return icons[ext] || '📄';
 }
 
+// ════════════════ Context Menu ════════════════
+
+let contextMenuFileId = null;
+let contextMenuFilename = null;
+
+function showContextMenu(event, fileId, filename) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    contextMenuFileId = fileId;
+    contextMenuFilename = filename;
+
+    const menu = document.getElementById('context-menu');
+    if (!menu) return;
+
+    // Position the menu
+    menu.style.display = 'block';
+    menu.style.left = Math.min(event.clientX, window.innerWidth - 220) + 'px';
+    menu.style.top = Math.min(event.clientY, window.innerHeight - 260) + 'px';
+}
+
+function hideContextMenu() {
+    const menu = document.getElementById('context-menu');
+    if (menu) menu.style.display = 'none';
+    contextMenuFileId = null;
+    contextMenuFilename = null;
+}
+
+function contextMenuAction(action) {
+    const fileId = contextMenuFileId;
+    const filename = contextMenuFilename;
+    hideContextMenu();
+
+    switch (action) {
+        case 'open':
+            previewFile(fileId, filename, '');
+            break;
+        case 'move':
+            showFolderPicker(fileId, 'move');
+            break;
+        case 'copy':
+            showFolderPicker(fileId, 'copy');
+            break;
+        case 'rename':
+            showRenameDialog(fileId, filename);
+            break;
+        case 'download':
+            downloadFile(fileId);
+            break;
+        case 'delete':
+            deleteFile(fileId);
+            break;
+        case 'details':
+            showFileDetail(fileId);
+            break;
+    }
+}
+
+// ─── Folder Picker Dialog ───
+
+let folderPickerFileId = null;
+let folderPickerMode = 'move'; // 'move' or 'copy'
+let folderPickerTree = null;
+let folderPickerSelected = '/';
+
+async function showFolderPicker(fileId, mode) {
+    folderPickerFileId = fileId;
+    folderPickerMode = mode;
+    folderPickerSelected = '/';
+
+    const dialog = document.getElementById('folder-picker-dialog');
+    if (!dialog) return;
+
+    const title = document.getElementById('folder-picker-title');
+    title.textContent = mode === 'copy' ? '📋 คัดลอกไฟล์ไปที่...' : '📁 ย้ายไฟล์ไปที่...';
+
+    const treeContainer = document.getElementById('folder-picker-tree');
+    treeContainer.innerHTML = '<div class="loading">กำลังโหลด...</div>';
+    dialog.style.display = 'flex';
+
+    // Load folder tree
+    try {
+        const res = await fetch(`${API}/api/folders/tree`);
+        const data = await res.json();
+        folderPickerTree = data.tree;
+        renderFolderPickerTree(data.tree['/'], '/', 0);
+    } catch {
+        treeContainer.innerHTML = '<div class="loading">เกิดข้อผิดพลาด</div>';
+    }
+}
+
+function renderFolderPickerTree(node, path, depth) {
+    const container = document.getElementById('folder-picker-tree');
+    const children = node.children || {};
+    const childPaths = Object.keys(children).sort();
+    const hasChildren = childPaths.length > 0;
+    const indent = depth * 20;
+    const displayName = path === '/' ? '🏠 Root' : node.name;
+    const isSelected = path === folderPickerSelected;
+
+    let html = `<div class="picker-tree-item ${isSelected ? 'selected' : ''}" style="padding-left:${indent + 8}px" onclick="selectPickerFolder('${escapePath(path)}')">`;
+
+    if (hasChildren) {
+        html += `<span class="picker-tree-toggle" onclick="event.stopPropagation();togglePickerFolder('${escapePath(path)}')">▶</span>`;
+    } else {
+        html += `<span class="picker-tree-toggle" style="visibility:hidden">▶</span>`;
+    }
+
+    html += `<span class="picker-tree-icon">${hasChildren ? '📂' : '📁'}</span>`;
+    html += `<span class="picker-tree-name">${displayName}</span>`;
+    html += `</div>`;
+
+    if (hasChildren) {
+        html += `<div class="picker-tree-children" id="picker-children-${path.replace(/\//g, '-')}" style="display:none">`;
+        for (const cp of childPaths) {
+            html += renderPickerChild(children[cp], cp, depth + 1);
+        }
+        html += `</div>`;
+    }
+
+    document.getElementById('folder-picker-tree').innerHTML += html;
+}
+
+function renderPickerChild(node, path, depth) {
+    const children = node.children || {};
+    const childPaths = Object.keys(children).sort();
+    const hasChildren = childPaths.length > 0;
+    const indent = depth * 20;
+    const displayName = path === '/' ? '🏠 Root' : node.name;
+    const isSelected = path === folderPickerSelected;
+
+    let html = `<div class="picker-tree-item ${isSelected ? 'selected' : ''}" style="padding-left:${indent + 8}px" onclick="selectPickerFolder('${escapePath(path)}')">`;
+    if (hasChildren) {
+        html += `<span class="picker-tree-toggle" onclick="event.stopPropagation();togglePickerFolder('${escapePath(path)}')">▶</span>`;
+    } else {
+        html += `<span class="picker-tree-toggle" style="visibility:hidden">▶</span>`;
+    }
+    html += `<span class="picker-tree-icon">${hasChildren ? '📂' : '📁'}</span>`;
+    html += `<span class="picker-tree-name">${displayName}</span>`;
+    html += `</div>`;
+
+    if (hasChildren) {
+        const childId = 'picker-children-' + path.replace(/\//g, '-');
+        html += `<div class="picker-tree-children" id="${childId}" style="display:none">`;
+        for (const cp of childPaths) {
+            html += renderPickerChild(children[cp], cp, depth + 1);
+        }
+        html += `</div>`;
+    }
+
+    return html;
+}
+
+function togglePickerFolder(path) {
+    const el = document.getElementById('picker-children-' + path.replace(/\//g, '-'));
+    if (el) {
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+function selectPickerFolder(path) {
+    folderPickerSelected = path;
+    document.querySelectorAll('.picker-tree-item').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.picker-tree-item').forEach(el => {
+        if (el.getAttribute('onclick')?.includes(path)) el.classList.add('selected');
+    });
+    // Update selected label
+    const label = document.getElementById('folder-picker-selected-path');
+    if (label) label.textContent = path;
+}
+
+async function confirmFolderPicker() {
+    const targetPath = folderPickerSelected;
+    const fileId = folderPickerFileId;
+    const mode = folderPickerMode;
+    closeFolderPicker();
+
+    if (!fileId) return;
+
+    try {
+        if (mode === 'move') {
+            const formData = new FormData();
+            formData.append('folder_path', targetPath);
+            const res = await fetch(`${API}/api/files/${fileId}/move`, { method: 'PATCH', body: formData });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`ย้าย "${data.filename}" ไป ${targetPath} สำเร็จ`);
+            } else {
+                showToast(data.detail || 'ย้ายล้มเหลว', 'error');
+            }
+        } else {
+            // Copy
+            const res = await fetch(`${API}/api/files/${fileId}/copy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder_path: targetPath }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`คัดลอก "${data.filename}" ไป ${targetPath} สำเร็จ`);
+            } else {
+                showToast(data.detail || 'คัดลิกล้มเหลว', 'error');
+            }
+        }
+
+        loadFiles(currentFolder);
+        loadFolderTree();
+    } catch (err) {
+        showToast(`${mode === 'move' ? 'ย้าย' : 'คัดลอก'}ล้มเหลว: ` + err.message, 'error');
+    }
+}
+
+function closeFolderPicker() {
+    const dialog = document.getElementById('folder-picker-dialog');
+    if (dialog) dialog.style.display = 'none';
+}
+
+// ─── Rename Dialog ───
+
+let renameFileId = null;
+
+function showRenameDialog(fileId, filename) {
+    renameFileId = fileId;
+    const dialog = document.getElementById('rename-dialog');
+    const input = document.getElementById('rename-input');
+    if (dialog && input) {
+        input.value = filename;
+        dialog.style.display = 'flex';
+        input.focus();
+        input.select();
+    }
+}
+
+function closeRenameDialog() {
+    const dialog = document.getElementById('rename-dialog');
+    if (dialog) dialog.style.display = 'none';
+    renameFileId = null;
+}
+
+async function confirmRename() {
+    const fileId = renameFileId;
+    const newName = document.getElementById('rename-input').value.trim();
+    closeRenameDialog();
+
+    if (!fileId || !newName) return;
+
+    try {
+        // Move to same folder with new name by copying then deleting
+        const infoRes = await fetch(`${API}/api/files/${fileId}`);
+        const info = await infoRes.json();
+
+        // Copy with new name
+        const copyRes = await fetch(`${API}/api/files/${fileId}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_path: info.folder, new_filename: newName }),
+        });
+
+        if (copyRes.ok) {
+            // Delete original
+            await fetch(`${API}/api/files/${fileId}`, { method: 'DELETE' });
+            showToast(`เปลี่ยนชื่อเป็น "${newName}" สำเร็จ`);
+            loadFiles(currentFolder);
+        } else {
+            const err = await copyRes.json();
+            showToast(err.detail || 'เปลี่ยนชื่อล้มเหลว', 'error');
+        }
+    } catch (err) {
+        showToast('เปลี่ยนชื่อล้มเหลว: ' + err.message, 'error');
+    }
+}
+
 // ════════════════ Dashboard ════════════════
 
 async function loadDashboard() {
@@ -595,7 +867,8 @@ async function loadFiles(folder = '/') {
             <div class="file-item ${selectedFiles.has(f.file_id) ? 'selected-multi' : ''}" draggable="true" data-file-id="${f.file_id}"
                  ondragstart="onFileDragStart(event, ${f.file_id})"
                  ondragend="onFileDragEnd(event)"
-                 onclick="onFileClick(event, ${f.file_id}, '${escapePath(f.filename)}', '${f.mime_type || ''}')">
+                 onclick="onFileClick(event, ${f.file_id}, '${escapePath(f.filename)}', '${f.mime_type || ''}')"
+                 oncontextmenu="showContextMenu(event, ${f.file_id}, '${escapePath(f.filename)}')">
                 <div class="file-icon">${getFileIcon(f.filename, f.is_split)}</div>
                 <div class="file-info">
                     <div class="file-name">
@@ -1404,6 +1677,37 @@ document.addEventListener('DOMContentLoaded', () => {
     // Close modal on outside click
     document.getElementById('file-modal')?.addEventListener('click', e => {
         if (e.target.classList.contains('modal')) closeModal();
+    });
+
+    // Close context menu on click anywhere
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#context-menu')) hideContextMenu();
+    });
+    document.addEventListener('contextmenu', (e) => {
+        if (!e.target.closest('.file-item')) hideContextMenu();
+    });
+
+    // Close dialogs on Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hideContextMenu();
+            closeFolderPicker();
+            closeRenameDialog();
+            closeModal();
+        }
+    });
+
+    // Close folder picker on outside click
+    document.getElementById('folder-picker-dialog')?.addEventListener('click', e => {
+        if (e.target.classList.contains('modal')) closeFolderPicker();
+    });
+    document.getElementById('rename-dialog')?.addEventListener('click', e => {
+        if (e.target.classList.contains('modal')) closeRenameDialog();
+    });
+
+    // Rename dialog enter key
+    document.getElementById('rename-input')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') confirmRename();
     });
 
     // Load dashboard by default
