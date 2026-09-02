@@ -169,6 +169,7 @@ async function manualSync() {
 let currentFolder = '/';
 let currentPreviewFileId = null;
 let folderTreeExpanded = new Set(['/']); // track expanded nodes
+let draggedFileId = null; // track which file is being dragged
 
 // ─── Folder Tree ───
 
@@ -195,7 +196,7 @@ function renderFolderTree(node, path, depth) {
     const displayName = path === '/' ? '🏠 Root' : node.name;
     const totalCount = (node.file_count || 0) + childPaths.reduce((sum, cp) => sum + (children[cp]?.file_count || 0), 0);
 
-    let html = `<div class="tree-item ${isActive ? 'active' : ''}" style="padding-left:${indent + 8}px" onclick="navigateFolder('${escapePath(path)}')" title="${path}">`;
+    let html = `<div class="tree-item ${isActive ? 'active' : ''}" style="padding-left:${indent + 8}px" onclick="navigateFolder('${escapePath(path)}')" title="${path}" ondragover="onFolderDragOver(event)" ondragleave="onFolderDragLeave(event)" ondrop="onFolderDrop(event, '${escapePath(path)}')">`;
 
     if (hasChildren) {
         html += `<span class="tree-toggle ${isExpanded ? 'open' : ''}" onclick="event.stopPropagation();toggleFolder('${escapePath(path)}')">▶</span>`;
@@ -225,6 +226,74 @@ function renderFolderTree(node, path, depth) {
 
 function escapePath(p) {
     return p.replace(/'/g, "\\'").replace(/\/\//g, '/');
+}
+
+// ─── Drag & Drop: File → Folder ───
+
+function onFileDragStart(event, fileId) {
+    draggedFileId = fileId;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', fileId);
+    // Add visual feedback to the dragged item
+    const item = event.target.closest('.file-item');
+    if (item) item.classList.add('dragging');
+}
+
+function onFileDragEnd(event) {
+    draggedFileId = null;
+    const item = event.target.closest('.file-item');
+    if (item) item.classList.remove('dragging');
+    // Remove all drag-over highlights
+    document.querySelectorAll('.tree-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+function onFolderDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const treeItem = event.target.closest('.tree-item');
+    if (treeItem) treeItem.classList.add('drag-over');
+}
+
+function onFolderDragLeave(event) {
+    const treeItem = event.target.closest('.tree-item');
+    if (treeItem) treeItem.classList.remove('drag-over');
+}
+
+async function onFolderDrop(event, targetPath) {
+    event.preventDefault();
+    const treeItem = event.target.closest('.tree-item');
+    if (treeItem) treeItem.classList.remove('drag-over');
+
+    const fileId = event.dataTransfer.getData('text/plain');
+    if (!fileId) return;
+
+    // Don't move to the same folder
+    if (targetPath === currentFolder) {
+        showToast('ไฟล์อยู่ในโฟลเดอร์นี้อยู่แล้ว', 'error');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('folder_path', targetPath);
+
+        const res = await fetch(`${API}/api/files/${fileId}/move`, {
+            method: 'PATCH',
+            body: formData,
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            showToast(`ย้าย "${data.filename}" ไป ${targetPath} สำเร็จ`);
+            // Refresh both source and target
+            loadFiles(currentFolder);
+            loadFolderTree();
+        } else {
+            showToast(data.detail || 'ย้ายไฟล์ล้มเหลว', 'error');
+        }
+    } catch (err) {
+        showToast('ย้ายไฟล์ล้มเหลว: ' + err.message, 'error');
+    }
 }
 
 function toggleFolder(path) {
@@ -263,14 +332,14 @@ function updateBreadcrumb(path) {
     if (!bar) return;
 
     const parts = path.split('/').filter(Boolean);
-    let html = `<span class="breadcrumb-item ${parts.length === 0 ? 'current' : ''}" onclick="navigateFolder('/')">🏠 root</span>`;
+    let html = `<span class="breadcrumb-item ${parts.length === 0 ? 'current' : ''}" onclick="navigateFolder('/')" ondragover="onFolderDragOver(event)" ondragleave="onFolderDragLeave(event)" ondrop="onFolderDrop(event, '/')">🏠 root</span>`;
 
     let accumulated = '';
     for (let i = 0; i < parts.length; i++) {
         accumulated += '/' + parts[i];
         const isCurrent = i === parts.length - 1;
         html += `<span class="breadcrumb-sep">/</span>`;
-        html += `<span class="breadcrumb-item ${isCurrent ? 'current' : ''}" onclick="navigateFolder('${escapePath(accumulated)}')">${parts[i]}</span>`;
+        html += `<span class="breadcrumb-item ${isCurrent ? 'current' : ''}" onclick="navigateFolder('${escapePath(accumulated)}')" ondragover="onFolderDragOver(event)" ondragleave="onFolderDragLeave(event)" ondrop="onFolderDrop(event, '${escapePath(accumulated)}')">${parts[i]}</span>`;
     }
 
     bar.innerHTML = html;
@@ -299,7 +368,10 @@ async function loadFiles(folder = '/') {
         }
 
         container.innerHTML = data.files.map(f => `
-            <div class="file-item" onclick="previewFile(${f.file_id}, '${escapePath(f.filename)}', '${f.mime_type || ''}')" data-file-id="${f.file_id}">
+            <div class="file-item" draggable="true" data-file-id="${f.file_id}"
+                 ondragstart="onFileDragStart(event, ${f.file_id})"
+                 ondragend="onFileDragEnd(event)"
+                 onclick="previewFile(${f.file_id}, '${escapePath(f.filename)}', '${f.mime_type || ''}')">
                 <div class="file-icon">${getFileIcon(f.filename, f.is_split)}</div>
                 <div class="file-info">
                     <div class="file-name">

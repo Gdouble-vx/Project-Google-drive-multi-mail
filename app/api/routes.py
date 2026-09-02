@@ -640,6 +640,34 @@ async def download_file(file_id: int, session: Session = Depends(get_db_session)
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
+@app.patch("/api/files/{file_id}/move")
+async def move_file(
+    file_id: int,
+    folder_path: str = Form(...),
+    session: Session = Depends(get_db_session)
+):
+    """Move a file to a different folder."""
+    vf = db.get_virtual_file(session, file_id)
+    if not vf:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Normalize path
+    folder_path = folder_path.rstrip("/") if folder_path != "/" else "/"
+    if not folder_path.startswith("/"):
+        folder_path = "/" + folder_path
+
+    vf.folder_path = folder_path
+    session.commit()
+    session.refresh(vf)
+
+    return {
+        "status": "success",
+        "file_id": vf.id,
+        "filename": vf.filename,
+        "folder_path": vf.folder_path,
+    }
+
+
 @app.delete("/api/files/{file_id}")
 async def delete_file(file_id: int, session: Session = Depends(get_db_session)):
     """Delete a file and all its chunks."""
