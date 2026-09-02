@@ -37,12 +37,63 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function showToast(message, type = 'success') {
+function showToast(message, type = 'success', duration = 4000) {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
+    if (duration > 0) setTimeout(() => toast.remove(), duration);
+    return toast;
+}
+
+function showUndoToast(message, undoCallback, undoLabel = 'ย้อนกลับ', countdownSec = 30) {
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-undo';
+    toast.innerHTML = `
+        <div class="toast-undo-content">
+            <span class="toast-undo-msg">${message}</span>
+            <div class="toast-undo-actions">
+                <button class="btn btn-sm toast-undo-btn" id="undo-btn-${Date.now()}">${undoLabel}</button>
+                <span class="toast-undo-countdown"></span>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(toast);
+
+    const btn = toast.querySelector('.toast-undo-btn');
+    const countdownEl = toast.querySelector('.toast-undo-countdown');
+    let remaining = countdownSec;
+    let undone = false;
+
+    // Countdown
+    const timer = setInterval(() => {
+        remaining--;
+        countdownEl.textContent = `${remaining}s`;
+        if (remaining <= 0) {
+            clearInterval(timer);
+            toast.remove();
+        }
+    }, 1000);
+    countdownEl.textContent = `${remaining}s`;
+
+    // Undo button
+    btn.addEventListener('click', async () => {
+        if (undone) return;
+        undone = true;
+        clearInterval(timer);
+        btn.textContent = 'กำลังย้อนกลับ...';
+        btn.disabled = true;
+        try {
+            await undoCallback();
+            toast.querySelector('.toast-undo-msg').textContent = 'ย้อนกลับสำเร็จ ✅';
+            setTimeout(() => toast.remove(), 1500);
+        } catch (err) {
+            toast.querySelector('.toast-undo-msg').textContent = 'ย้อนกลับล้มเหลว ❌';
+            setTimeout(() => toast.remove(), 2000);
+        }
+    });
+
+    return toast;
 }
 
 function getFileIcon(filename, isSplit) {
@@ -395,6 +446,18 @@ async function onFolderDrop(event, targetPath) {
     }
 
     try {
+        // Fetch original folder paths before moving
+        const originalPaths = {};
+        for (const fid of fileIds) {
+            try {
+                const infoRes = await fetch(`${API}/api/files/${fid}`);
+                if (infoRes.ok) {
+                    const info = await infoRes.json();
+                    originalPaths[fid] = info.folder || '/';
+                }
+            } catch {}
+        }
+
         if (fileIds.length === 1) {
             // Single file move
             const formData = new FormData();
@@ -404,7 +467,17 @@ async function onFolderDrop(event, targetPath) {
             });
             const data = await res.json();
             if (res.ok) {
-                showToast(`ย้าย "${data.filename}" ไป ${targetPath} สำเร็จ`);
+                showUndoToast(
+                    `ย้าย \"${data.filename}\" ไป ${targetPath} สำเร็จ`,
+                    async () => {
+                        const fd = new FormData();
+                        fd.append('folder_path', originalPaths[fileIds[0]] || '/');
+                        await fetch(`${API}/api/files/${fileIds[0]}/move`, { method: 'PATCH', body: fd });
+                        loadFiles(currentFolder);
+                        loadFolderTree();
+                    },
+                    '↩️ ย้อนกลับ'
+                );
             } else {
                 showToast(data.detail || 'ย้ายไฟล์ล้มเหลว', 'error');
             }
@@ -417,7 +490,22 @@ async function onFolderDrop(event, targetPath) {
             });
             const data = await res.json();
             if (res.ok) {
-                showToast(`ย้าย ${data.moved} ไฟล์ไป ${targetPath} สำเร็จ${data.errors > 0 ? `, ${data.errors} ล้มเหลว` : ''}`);
+                showUndoToast(
+                    `ย้าย ${data.moved} ไฟล์ไป ${targetPath} สำเร็จ${data.errors > 0 ? `, ${data.errors} ล้มเหลว` : ''}`,
+                    async () => {
+                        await fetch(`${API}/api/files/batch-move`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                file_ids: fileIds,
+                                folder_path: originalPaths[fileIds[0]] || '/',
+                            }),
+                        });
+                        loadFiles(currentFolder);
+                        loadFolderTree();
+                    },
+                    '↩️ ย้อนกลับ'
+                );
             } else {
                 showToast(data.detail || 'ย้ายไฟล์ล้มเหลว', 'error');
             }
